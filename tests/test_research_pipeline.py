@@ -45,7 +45,29 @@ class ResearchPipelineTests(unittest.TestCase):
                 "content": f"<html><body><h1>{url}</h1><p>Restaurant A 4.8/5</p></body></html>",
             }
 
-        pipeline = ResearchPipeline(searcher=fake_search, fetcher=fake_fetch)
+        class FakeExtractor:
+            def extract(self, query, source):
+                return {
+                    "status": "ok",
+                    "summary": "Extrahierte Restaurantdaten",
+                    "confidence": 0.9,
+                    "facts": [
+                        {
+                            "name": "Restaurant A",
+                            "location": "Hamburg",
+                            "rating": 4.8,
+                            "category": "Restaurant",
+                            "source": source["url"],
+                            "evidence": "Restaurant A 4.8/5",
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "validated": True,
+                    "warnings": [],
+                    "source": source["url"],
+                }
+
+        pipeline = ResearchPipeline(searcher=fake_search, fetcher=fake_fetch, extractor=FakeExtractor())
         result = pipeline.run(
             "beste restaurants hamburg",
             memory_context="Benutzer mag gute italienische Restaurants",
@@ -60,6 +82,7 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertIn("Restaurant A", result.research_context)
         self.assertTrue(result.citations)
         self.assertTrue(all("source" in citation for citation in result.citations))
+        self.assertIn("Quellenverfolgung", result.citation_context)
 
 
 if __name__ == "__main__":

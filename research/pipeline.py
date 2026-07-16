@@ -5,9 +5,12 @@ from dataclasses import dataclass, field
 from tools.internet_research import web_search
 from tools.web_fetch import fetch_url
 
+from .citations import CitationTracker
 from .extractor import ResearchExtractor
 from .html_parser import extract_html_content
+from .memory_integration import ResearchMemoryIntegrator
 from .source_ranker import SourceRanker
+from .synthesizer import ResearchSynthesizer
 
 
 logger = logging.getLogger(__name__)
@@ -34,8 +37,10 @@ class ResearchResult:
     citations: list[dict] = field(default_factory=list)
     confidence: float = 0.5
     research_context: str = ""
+    citation_context: str = ""
     existing_knowledge: str = ""
     warnings: list[str] = field(default_factory=list)
+    memory_actions: list[dict] = field(default_factory=list)
 
 
 class ResearchPipeline:
@@ -46,9 +51,13 @@ class ResearchPipeline:
         self.fetcher = fetcher
         self.source_ranker = source_ranker or SourceRanker()
         self.extractor = extractor or ResearchExtractor(model=model)
-        self.synthesizer = synthesizer
-        self.citation_tracker = citation_tracker
+        self.citation_tracker = citation_tracker or CitationTracker()
+        self.synthesizer = synthesizer or ResearchSynthesizer(
+            model=model,
+            citation_tracker=self.citation_tracker
+        )
         self.memory = memory
+        self.memory_integrator = ResearchMemoryIntegrator(memory) if memory is not None else None
 
 
     def _parse_json(self, payload, fallback=None):
@@ -232,6 +241,7 @@ class ResearchPipeline:
         citations = synthesis.get("citations", []) if isinstance(synthesis, dict) else []
         confidence = synthesis.get("confidence", 0.5) if isinstance(synthesis, dict) else 0.5
         warnings = synthesis.get("warnings", []) if isinstance(synthesis, dict) else []
+        citation_context = self.citation_tracker.as_context() if self.citation_tracker else ""
 
         research_context_lines = []
         if existing_knowledge:
@@ -257,6 +267,18 @@ class ResearchPipeline:
             for warning in warnings:
                 research_context_lines.append(f"- {warning}")
 
+        memory_actions = []
+        if self.memory_integrator is not None:
+            explicit_request = any(
+                token in query.casefold()
+                for token in ("merke dir", "speichere", "notiere", "remember", "save this", "save that")
+            )
+            memory_actions = self.memory_integrator.persist(
+                query,
+                synthesis,
+                explicit_request=explicit_request,
+            )
+
         return ResearchResult(
             query=query,
             summary=summary,
@@ -265,6 +287,8 @@ class ResearchPipeline:
             citations=citations,
             confidence=confidence,
             research_context="\n".join(research_context_lines).strip(),
+            citation_context=citation_context,
             existing_knowledge=existing_knowledge,
             warnings=warnings,
+            memory_actions=memory_actions,
         )
