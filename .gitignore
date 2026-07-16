@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.venv/
+workspace/gui/
+tool_events.db
