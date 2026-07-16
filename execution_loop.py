@@ -1,8 +1,10 @@
+import json
 import logging
 
 import ollama
 
 from planner import Plan
+from research.pipeline import ResearchPipeline
 
 
 logger = logging.getLogger(__name__)
@@ -10,18 +12,25 @@ logger = logging.getLogger(__name__)
 
 class ExecutionLoop:
 
-    def __init__(self, model, tool_executor, tool_manager, critic=None):
+    def __init__(self, model, tool_executor, tool_manager, critic=None, research_pipeline=None):
         self.model = model
         self.tool_executor = tool_executor
         self.tool_manager = tool_manager
         self.critic = critic
+        self.research_pipeline = research_pipeline or ResearchPipeline(model=model)
+
+
+    def _format_value(self, value):
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+        return str(value)
 
 
     def _render_step_results(self, step_results):
         lines = []
         for index, item in enumerate(step_results, start=1):
             lines.append(
-                f"Schritt {index} [{item.get('action')}]: {item.get('result')}"
+                f"Schritt {index} [{item.get('action')}]: {self._format_value(item.get('result'))}"
             )
         return "\n".join(lines)
 
@@ -126,6 +135,21 @@ Ergebnisse der Ausführung:
                         "action": step.action,
                         "input": step.input,
                         "result": result,
+                        "status": "ok"
+                    }
+                )
+                continue
+
+            if step.action in {"research", "research_pipeline"}:
+                result = self.research_pipeline.run(
+                    query=str(step.input or user_input),
+                    memory_context=memory_context
+                )
+                step_results.append(
+                    {
+                        "action": step.action,
+                        "input": step.input,
+                        "result": result.__dict__ if hasattr(result, "__dict__") else result,
                         "status": "ok"
                     }
                 )

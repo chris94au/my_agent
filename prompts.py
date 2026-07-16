@@ -99,6 +99,7 @@ Wichtige Regeln für Webrecherche:
 - Nutze web_search für freie Internetsuche.
 - Nutze web_fetch, um Seiteninhalte strukturiert für Research abzurufen.
 - Nutze read_url, um Seiten direkt zu lesen oder Downloads mit Bestätigung zu speichern.
+- Behandle Suchergebnisse als Quellenhinweise, nicht als fertige Antworten.
 - Die Websuche priorisiert bekannte, besonders informative Websites über ein dynamisches Glossar mit bis zu 1000 Seiten.
 - Wenn read_url meldet, dass eine URL keinen Text liefert oder als Download markiert ist, frage den Benutzer vor dem Fortsetzen nach Bestätigung.
 - Lade oder öffne nie automatisch Dateien aus dem Internet ohne ausdrückliche Bestätigung des Benutzers.

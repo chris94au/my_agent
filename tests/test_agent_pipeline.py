@@ -105,13 +105,38 @@ class FakeCritic:
         )
 
 
+class FakeResearchPipeline:
+
+    def __init__(self, model=None, memory=None):
+        self.model = model
+        self.memory = memory
+        self.calls = []
+
+
+    def run(self, query, memory_context="", limit=5):
+        self.calls.append((query, memory_context, limit))
+        return type(
+            "ResearchResult",
+            (),
+            {
+                "query": query,
+                "summary": "Research summary",
+                "sources_used": ["https://example.com"],
+                "citations": [],
+                "confidence": 0.9,
+                "research_context": "Research Summary:\nResearch summary"
+            }
+        )()
+
+
 class FakeExecutionLoop:
 
-    def __init__(self, model, tool_executor, tool_manager, critic=None):
+    def __init__(self, model, tool_executor, tool_manager, critic=None, research_pipeline=None):
         self.model = model
         self.tool_executor = tool_executor
         self.tool_manager = tool_manager
         self.critic = critic
+        self.research_pipeline = research_pipeline
         self.calls = []
 
 
@@ -158,6 +183,7 @@ class AgentPipelineTests(unittest.TestCase):
         self._original_planner = agent_module.Planner
         self._original_critic = agent_module.Critic
         self._original_execution_loop = agent_module.ExecutionLoop
+        self._original_research_pipeline = agent_module.ResearchPipeline
 
         agent_module.Memory = FakeMemory
         agent_module.MemoryExtractor = FakeExtractor
@@ -165,6 +191,7 @@ class AgentPipelineTests(unittest.TestCase):
         agent_module.ConversationSummarizer = FakeSummarizer
         agent_module.Planner = FakePlanner
         agent_module.Critic = FakeCritic
+        agent_module.ResearchPipeline = FakeResearchPipeline
         agent_module.ExecutionLoop = FakeExecutionLoop
 
         self.agent = agent_module.Agent()
@@ -177,6 +204,7 @@ class AgentPipelineTests(unittest.TestCase):
         agent_module.ConversationSummarizer = self._original_summarizer
         agent_module.Planner = self._original_planner
         agent_module.Critic = self._original_critic
+        agent_module.ResearchPipeline = self._original_research_pipeline
         agent_module.ExecutionLoop = self._original_execution_loop
 
 

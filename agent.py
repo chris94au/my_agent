@@ -13,6 +13,7 @@ from normalizer import Normalizer
 from parser import ToolParser
 from planner import Planner
 from prompts import create_system_prompt
+from research.pipeline import ResearchPipeline
 from tool_executor import ToolExecutor
 from tools import tool_manager
 
@@ -30,19 +31,25 @@ class Agent:
         self.executor = ToolExecutor()
         self.planner = Planner(model=model)
         self.critic = Critic(model=model)
-        self.execution_loop = ExecutionLoop(
-            model=model,
-            tool_executor=self.executor,
-            tool_manager=tool_manager,
-            critic=self.critic
-        )
-        self.parser = ToolParser()
 
         self.memory = Memory()
         self.memory_extractor = MemoryExtractor()
         self.memory_validator = MemoryValidator()
         self.memory_summarizer = ConversationSummarizer()
         self.normalizer = Normalizer()
+
+        self.research_pipeline = ResearchPipeline(
+            model=model,
+            memory=self.memory
+        )
+        self.execution_loop = ExecutionLoop(
+            model=model,
+            tool_executor=self.executor,
+            tool_manager=tool_manager,
+            critic=self.critic,
+            research_pipeline=self.research_pipeline
+        )
+        self.parser = ToolParser()
 
         self.system_prompt = create_system_prompt(
             tool_manager

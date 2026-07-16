@@ -15,7 +15,9 @@ SPECIAL_ACTIONS = {
     "summarize",
     "analyze",
     "reflect",
-    "review"
+    "review",
+    "research",
+    "research_pipeline",
 }
 
 
@@ -48,8 +50,8 @@ class Planner:
 Du bist ein Planner für einen lokalen KI-Agenten.
 
 Deine Aufgabe ist es, eine Benutzeranfrage in geordnete Ausführungsschritte zu zerlegen.
-Wenn die Aufgabe einfach ist, genügt ein einzelner Schritt.
-Wenn sie komplex ist, dekomponiere sie in klar geordnete Teilschritte.
+Wenn die Aufgabe einfache Faktenfragen, Vergleiche oder Recherchen umfasst,
+plane ausdrücklich eine Research-Pipeline statt nur einer Websuche.
 
 Verfügbare Werkzeuge:
 {tool_descriptions}
@@ -67,7 +69,7 @@ Schema:
   "goal": "kurzes Hauptziel",
   "steps": [
     {{
-      "action": "tool_name_oder_summarize_oder_analyze_oder_respond",
+      "action": "tool_name_oder_research_oder_summarize_oder_analyze_oder_respond",
       "input": "optional oder Objekt",
       "description": "kurze Beschreibung"
     }}
@@ -76,6 +78,7 @@ Schema:
 
 Regeln:
 - Nutze nur Werkzeuge, die in der Liste verfügbar sind.
+- Für echte Research-Aufgaben bevorzuge die Aktion research.
 - Ordne die Schritte logisch.
 - Maximal {self.max_steps} Schritte.
 - Das letzte Ziel soll immer zu einer Benutzerantwort führen.
@@ -105,7 +108,22 @@ Regeln:
         steps = []
         goal = user_input.strip()[:120] or "Aufgabe ausführen"
 
-        if any(token in lowered for token in ("analys", "fasse", "zusammen", "datei", "inhalt")):
+        if any(token in lowered for token in ("research", "recherch", "quellen", "quelle", "bestbewertet", "aktuell", "finde", "empfeh", "welche", "was sind", "wie sind")):
+            steps.extend(
+                [
+                    PlanStep(
+                        action="research",
+                        input=user_input,
+                        description="Mehrquellen-Recherche durchführen",
+                        tool="research"
+                    ),
+                    PlanStep(
+                        action="respond",
+                        description="Ergebnis in normaler Sprache beantworten"
+                    )
+                ]
+            )
+        elif any(token in lowered for token in ("analys", "fasse", "zusammen", "datei", "inhalt")):
             file_match = re.search(r"([\w./-]+\.(?:txt|md|py|json|csv|log|yaml|yml))", user_input, re.I)
             if file_match:
                 steps.append(
