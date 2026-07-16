@@ -1,11 +1,8 @@
 import logging
-import re
 import urllib.error
-import urllib.parse
 import urllib.request
-from html import unescape
-from html.parser import HTMLParser
 
+from research.html_parser import extract_html_content
 from .registry import Tool, ToolParameter
 
 
@@ -19,62 +16,6 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/126.0 Safari/537.36"
 )
-
-
-class _BasicHTMLExtractor(HTMLParser):
-
-    def __init__(self):
-        super().__init__()
-        self.title_parts = []
-        self.body_parts = []
-        self._skip_depth = 0
-        self._in_title = False
-
-
-    def handle_starttag(self, tag, attrs):
-        tag = tag.lower()
-        if tag in {"script", "style", "noscript", "nav", "aside", "footer"}:
-            self._skip_depth += 1
-            return
-        if self._skip_depth:
-            return
-        if tag == "title":
-            self._in_title = True
-        elif tag in {"p", "div", "li", "article", "section", "h1", "h2", "h3", "h4", "h5", "h6", "br"}:
-            self.body_parts.append("\n")
-
-
-    def handle_endtag(self, tag):
-        tag = tag.lower()
-        if tag in {"script", "style", "noscript", "nav", "aside", "footer"} and self._skip_depth:
-            self._skip_depth -= 1
-            return
-        if self._skip_depth:
-            return
-        if tag == "title":
-            self._in_title = False
-        elif tag in {"p", "div", "li", "article", "section"}:
-            self.body_parts.append("\n")
-
-
-    def handle_data(self, data):
-        if self._skip_depth:
-            return
-        text = " ".join(str(data).split())
-        if not text:
-            return
-        if self._in_title:
-            self.title_parts.append(text)
-        self.body_parts.append(text)
-
-
-    def get_title(self):
-        return " ".join(self.title_parts).strip()
-
-
-    def get_content(self):
-        return " ".join(self.body_parts).strip()
-
 
 
 def _normalize_input(data):
@@ -107,21 +48,6 @@ def _decode_body(response):
         return body.decode(encoding, errors="replace")
     except LookupError:
         return body.decode("utf-8", errors="replace")
-
-
-
-def _extract_title_and_content(html_text):
-    parser = _BasicHTMLExtractor()
-    parser.feed(html_text)
-    parser.close()
-
-    title = parser.get_title()
-    content = parser.get_content()
-    if not content:
-        content = " ".join(unescape(html_text).split())
-    content = re.sub(r"\s+", " ", content).strip()
-    title = re.sub(r"\s+", " ", title).strip()
-    return title, content
 
 
 
@@ -210,7 +136,7 @@ def fetch_url(data):
             content = raw_body[:max_chars]
             title = ""
         else:
-            title, content = _extract_title_and_content(raw_body)
+            title, content = extract_html_content(raw_body)
             if len(content) > max_chars:
                 content = content[:max_chars].rsplit(" ", 1)[0] + " …"
 
