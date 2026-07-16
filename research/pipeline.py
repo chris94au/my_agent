@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from tools.internet_research import web_search
 from tools.web_fetch import fetch_url
 
+from .extractor import ResearchExtractor
 from .html_parser import extract_html_content
 from .source_ranker import SourceRanker
 
@@ -44,7 +45,7 @@ class ResearchPipeline:
         self.searcher = searcher
         self.fetcher = fetcher
         self.source_ranker = source_ranker or SourceRanker()
-        self.extractor = extractor
+        self.extractor = extractor or ResearchExtractor(model=model)
         self.synthesizer = synthesizer
         self.citation_tracker = citation_tracker
         self.memory = memory

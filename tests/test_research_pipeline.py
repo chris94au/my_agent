@@ -1,6 +1,11 @@
 import json
 import unittest
 
+from helpers import install_dummy_ollama
+
+
+install_dummy_ollama()
+
 from research.pipeline import ResearchPipeline
 
 
