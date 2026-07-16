@@ -1,6 +1,11 @@
-import ollama
 import json
+import logging
 import re
+
+import ollama
+
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryValidator:
@@ -11,9 +16,53 @@ class MemoryValidator:
         self.model = model
 
 
+    def _conversation_excerpt(self, conversation, limit=3500):
+        if not conversation:
+            return ""
 
-    def validate(self, memory):
+        text = str(conversation).strip()
+        if len(text) <= limit:
+            return text
 
+        return text[-limit:]
+
+
+    def _fallback_confidence(self, memory, conversation):
+        text = (conversation or "").casefold()
+        value = str(memory.get("value", "")).casefold()
+        key = str(memory.get("key", "")).casefold()
+
+        confidence = 0.55
+
+        if value and value in text:
+            confidence += 0.25
+
+        if key and key in text:
+            confidence += 0.1
+
+        hedge_words = (
+            "vielleicht",
+            "eventuell",
+            "wahrscheinlich",
+            "glaube",
+            "scheint",
+            "könnte",
+            "maybe",
+            "perhaps",
+            "probably"
+        )
+
+        if any(word in text for word in hedge_words):
+            confidence -= 0.15
+
+        return max(0.1, min(confidence, 1.0))
+
+
+    def validate(self, memory, conversation=None):
+
+        excerpt = self._conversation_excerpt(
+            conversation
+        )
 
         prompt = f"""
 Du bist ein Memory-Validator.
@@ -27,7 +76,6 @@ Speichere nur Informationen, die:
 - etwas über Fähigkeiten, Interessen,
   Projekte oder Präferenzen aussagen
 
-
 Verwerfen:
 - aktuelle Stimmung
 - einmalige Ereignisse
@@ -35,42 +83,54 @@ Verwerfen:
 - temporäre Aktivitäten
 - zufällige Aussagen
 
+Bewerte außerdem die Vertrauenswürdigkeit:
+- direkte Aussagen des Benutzers: hohe confidence
+- unsichere oder nur abgeleitete Informationen: niedrigere confidence
+
+Kontext:
+{excerpt}
 
 Information:
-
 {json.dumps(memory, ensure_ascii=False)}
-
 
 Antworte ausschließlich mit JSON.
 
 Wenn speichern:
-
 {{
     "approved": true,
-    "importance": 1-10
+    "importance": 1-10,
+    "confidence": 0.0-1.0
 }}
 
 Wenn nicht speichern:
-
 {{
-    "approved": false
+    "approved": false,
+    "confidence": 0.0-1.0
 }}
 """
 
-
-        response = ollama.chat(
-            model=self.model,
-            messages=[
-                {
-                    "role":"user",
-                    "content":prompt
-                }
-            ]
-        )
-
+        try:
+            response = ollama.chat(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+        except Exception as exc:
+            logger.warning(
+                "Memory validation fallback due to chat error: %s",
+                exc
+            )
+            return {
+                "approved": True,
+                "importance": int(memory.get("importance", 5)),
+                "confidence": self._fallback_confidence(memory, conversation)
+            }
 
         text = response["message"]["content"]
-
 
         match = re.search(
             r"\{.*\}",
@@ -78,19 +138,28 @@ Wenn nicht speichern:
             re.DOTALL
         )
 
-
         if not match:
-
-            return None
-
+            return {
+                "approved": True,
+                "importance": int(memory.get("importance", 5)),
+                "confidence": self._fallback_confidence(memory, conversation)
+            }
 
         try:
-
-            return json.loads(
+            data = json.loads(
                 match.group()
             )
+        except json.JSONDecodeError:
+            return {
+                "approved": True,
+                "importance": int(memory.get("importance", 5)),
+                "confidence": self._fallback_confidence(memory, conversation)
+            }
 
+        if "confidence" not in data or data["confidence"] is None:
+            data["confidence"] = self._fallback_confidence(memory, conversation)
 
-        except:
+        if data.get("approved", False):
+            data["importance"] = int(data.get("importance", memory.get("importance", 5)))
 
-            return None
+        return data
