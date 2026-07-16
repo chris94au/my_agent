@@ -1,4 +1,12 @@
+import logging
+
 from agent import Agent
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s"
+)
 
 
 def main():
