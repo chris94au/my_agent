@@ -1,11 +1,15 @@
-import sqlite3
 import json
+import sqlite3
 
 from embedding import Embedding
 from similarity import cosine_similarity
+from normalizer import Normalizer
 
 
 class Memory:
+
+    SEMANTIC_DUPLICATE_THRESHOLD = 0.86
+
 
     def __init__(self, db_path="memory.db"):
 
@@ -14,6 +18,7 @@ class Memory:
         )
 
         self.embedder = Embedding()
+        self.normalizer = Normalizer()
 
         self.create_table()
 
@@ -48,6 +53,213 @@ class Memory:
 
 
 
+    def _normalize_fact_inputs(
+        self,
+        category,
+        key,
+        value
+    ):
+
+        fact = {
+            "category": category,
+            "key": key,
+            "value": value
+        }
+
+        return self.normalizer.normalize(
+            fact
+        )
+
+
+    def _normalize_text(self, text):
+
+        return " ".join(
+            str(text).strip().split()
+        ).casefold()
+
+
+    def _build_embedding_text(
+        self,
+        category,
+        key,
+        value
+    ):
+
+        return (
+            f"{category}: "
+            f"{key}: "
+            f"{value}"
+        )
+
+
+    def _row_to_fact(self, row):
+
+        if not row:
+            return None
+
+        fact_id, category, key, value, importance = row
+
+        return {
+            "id": fact_id,
+            "category": category,
+            "key": key,
+            "value": value,
+            "importance": importance
+        }
+
+
+    def _fetch_fact_by_slot(
+        self,
+        category,
+        key
+    ):
+
+        cursor = self.connection.cursor()
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                category,
+                key,
+                value,
+                importance
+            FROM facts
+            WHERE LOWER(TRIM(category)) = LOWER(TRIM(?))
+              AND LOWER(TRIM(key)) = LOWER(TRIM(?))
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1
+            """,
+            (
+                category,
+                key
+            )
+        )
+
+        return self._row_to_fact(
+            cursor.fetchone()
+        )
+
+
+    def _fetch_facts_with_embeddings(self):
+
+        cursor = self.connection.cursor()
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                category,
+                key,
+                value,
+                importance,
+                embedding
+            FROM facts
+            WHERE embedding IS NOT NULL
+            """
+        )
+
+        facts = []
+
+        for row in cursor.fetchall():
+
+            fact_id, category, key, value, importance, embedding_json = row
+
+            try:
+                embedding = json.loads(
+                    embedding_json
+                )
+            except (TypeError, json.JSONDecodeError):
+                continue
+
+            facts.append(
+                {
+                    "id": fact_id,
+                    "category": category,
+                    "key": key,
+                    "value": value,
+                    "importance": importance,
+                    "embedding": embedding
+                }
+            )
+
+        return facts
+
+
+    def _remove_duplicate_slot_rows(
+        self,
+        category,
+        key,
+        keep_id
+    ):
+
+        cursor = self.connection.cursor()
+
+        cursor.execute(
+            """
+            DELETE FROM facts
+            WHERE LOWER(TRIM(category)) = LOWER(TRIM(?))
+              AND LOWER(TRIM(key)) = LOWER(TRIM(?))
+              AND id != ?
+            """,
+            (
+                category,
+                key,
+                keep_id
+            )
+        )
+
+        self.connection.commit()
+
+
+    def _find_best_semantic_duplicate(
+        self,
+        category,
+        key,
+        value,
+        threshold=None
+    ):
+
+        if threshold is None:
+            threshold = self.SEMANTIC_DUPLICATE_THRESHOLD
+
+        query_text = self._build_embedding_text(
+            category,
+            key,
+            value
+        )
+
+        query_embedding = self.embedder.create(
+            query_text
+        )
+
+        best_match = None
+
+        for fact in self._fetch_facts_with_embeddings():
+
+            score = cosine_similarity(
+                query_embedding,
+                fact["embedding"]
+            )
+
+            if score < threshold:
+                continue
+
+            if best_match is None or score > best_match["score"]:
+
+                best_match = {
+                    "id": fact["id"],
+                    "category": fact["category"],
+                    "key": fact["key"],
+                    "value": fact["value"],
+                    "importance": fact["importance"],
+                    "score": score,
+                    "match_type": "semantic"
+                }
+
+        return best_match
+
+
     def save_fact(
         self,
         category,
@@ -56,12 +268,21 @@ class Memory:
         importance=5
     ):
 
-        existing = self.find_similar_fact(
+        normalized_fact = self._normalize_fact_inputs(
             category,
             key,
             value
         )
 
+        category = normalized_fact["category"]
+        key = normalized_fact["key"]
+        value = normalized_fact["value"]
+
+        existing = self.find_similar_fact(
+            category,
+            key,
+            value
+        )
 
         if existing:
 
@@ -70,18 +291,36 @@ class Memory:
                 existing
             )
 
-            self.update_fact(
-                existing,
-                importance
-            )
+            if existing.get("match_type") == "slot":
+
+                value_changed = self._normalize_text(
+                    existing["value"]
+                ) != self._normalize_text(
+                    value
+                )
+
+                self.update_fact(
+                    existing,
+                    importance,
+                    new_value=value if value_changed else None
+                )
+
+            else:
+
+                self.update_fact(
+                    existing,
+                    importance,
+                    new_value=None
+                )
 
             return "updated"
 
 
 
-        text = (
-            f"{category}: "
-            f"{value}"
+        text = self._build_embedding_text(
+            category,
+            key,
+            value
         )
 
 
@@ -139,55 +378,36 @@ class Memory:
         threshold=0.80
     ):
 
-        query = (
-            f"{category}: "
-            f"{value}"
+        query = self._normalize_fact_inputs(
+            category,
+            key,
+            value
         )
 
-
-        results = self.semantic_search(
-            query,
-            limit=5
+        exact = self._fetch_fact_by_slot(
+            query["category"],
+            query["key"]
         )
 
+        if exact:
 
-        for result in results:
+            exact["match_type"] = "slot"
+            exact["score"] = 1.0
+            return exact
 
-
-            old_category, old_key, old_value, old_importance, score = result
-
-
-            print(
-                "MEMORY SIMILARITY CHECK:",
-                old_value,
-                score
-            )
-
-
-            if score >= threshold:
-
-                return {
-
-                    "category": old_category,
-
-                    "key": old_key,
-
-                    "value": old_value,
-
-                    "importance": old_importance,
-
-                    "score": score
-                }
-
-
-        return None
-
+        return self._find_best_semantic_duplicate(
+            query["category"],
+            query["key"],
+            query["value"],
+            threshold=threshold
+        )
 
 
     def update_fact(
         self,
         old_fact,
-        new_importance
+        new_importance,
+        new_value=None
     ):
 
         cursor = self.connection.cursor()
@@ -199,37 +419,133 @@ class Memory:
         )
 
 
-        cursor.execute(
-            """
-            UPDATE facts
+        if new_value is None:
 
-            SET importance = ?
+            if "id" in old_fact:
 
-            WHERE
-            category = ?
+                cursor.execute(
+                    """
+                    UPDATE facts
 
-            AND
+                    SET importance = ?
 
-            key = ?
+                    WHERE id = ?
 
-            AND
+                    """,
+                    (
+                        importance,
+                        old_fact["id"]
+                    )
+                )
 
-            value = ?
+            else:
 
-            """,
-            (
-                importance,
+                cursor.execute(
+                    """
+                    UPDATE facts
 
+                    SET importance = ?
+
+                    WHERE
+                    category = ?
+
+                    AND
+
+                    key = ?
+
+                    AND
+
+                    value = ?
+
+                    """,
+                    (
+                        importance,
+
+                        old_fact["category"],
+
+                        old_fact["key"],
+
+                        old_fact["value"]
+                    )
+                )
+
+        else:
+
+            embedding_text = self._build_embedding_text(
                 old_fact["category"],
-
                 old_fact["key"],
-
-                old_fact["value"]
+                new_value
             )
-        )
+
+            embedding = self.embedder.create(
+                embedding_text
+            )
+
+            if "id" in old_fact:
+
+                cursor.execute(
+                    """
+                    UPDATE facts
+
+                    SET importance = ?,
+                        value = ?,
+                        embedding = ?
+
+                    WHERE id = ?
+
+                    """,
+                    (
+                        importance,
+                        new_value,
+                        json.dumps(embedding),
+                        old_fact["id"]
+                    )
+                )
+
+            else:
+
+                cursor.execute(
+                    """
+                    UPDATE facts
+
+                    SET importance = ?,
+                        value = ?,
+                        embedding = ?
+
+                    WHERE
+                    category = ?
+
+                    AND
+
+                    key = ?
+
+                    AND
+
+                    value = ?
+
+                    """,
+                    (
+                        importance,
+                        new_value,
+                        json.dumps(embedding),
+
+                        old_fact["category"],
+
+                        old_fact["key"],
+
+                        old_fact["value"]
+                    )
+                )
 
 
         self.connection.commit()
+
+        if old_fact.get("match_type") == "slot":
+            self._remove_duplicate_slot_rows(
+                old_fact["category"],
+                old_fact["key"],
+                old_fact.get("id")
+            )
 
 
         print(
