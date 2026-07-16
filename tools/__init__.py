@@ -10,6 +10,7 @@ from .filesystem import (
 )
 from .registry import Tool, ToolManager, ToolParameter, tool_manager, tool_registry
 from .web import read_url, read_url_tool, tool, web_search, web_search_tool
+from .web_fetch import fetch_url, web_fetch_tool
 
 
 
@@ -21,6 +22,7 @@ tool_manager.register_many(
         write_file_tool,
         web_search_tool,
         read_url_tool,
+        web_fetch_tool,
     ]
 )
 
