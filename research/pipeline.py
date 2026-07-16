@@ -6,6 +6,7 @@ from tools.internet_research import web_search
 from tools.web_fetch import fetch_url
 
 from .html_parser import extract_html_content
+from .source_ranker import SourceRanker
 
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ class ResearchPipeline:
         self.model = model
         self.searcher = searcher
         self.fetcher = fetcher
-        self.source_ranker = source_ranker
+        self.source_ranker = source_ranker or SourceRanker()
         self.extractor = extractor
         self.synthesizer = synthesizer
         self.citation_tracker = citation_tracker
@@ -83,37 +84,19 @@ class ResearchPipeline:
             if source.url.startswith(("http://", "https://")):
                 sources.append(source)
 
-        if self.source_ranker is not None:
-            ranked = self.source_ranker.rank_sources(query, [source.__dict__ for source in sources], limit=limit)
-            ranked_sources = []
-            for item in ranked:
-                ranked_source = ResearchSource(
-                    title=str(item.get("title", "")).strip(),
-                    url=str(item.get("url", "")).strip(),
-                    snippet=str(item.get("snippet", "")).strip(),
-                    rank_score=float(item.get("score", 0.0) or 0.0),
-                    reliability=float(item.get("reliability", 0.5) or 0.5),
-                    relevance=float(item.get("relevance", 0.5) or 0.5),
-                )
-                ranked_sources.append(ranked_source)
-            return ranked_sources
-
-        # Simple fallback ranking by snippet/title overlap.
-        keywords = [word.lower() for word in query.split() if len(word) > 2]
-
-        def score(source):
-            haystack = f"{source.title} {source.snippet}".lower()
-            relevance = sum(1 for keyword in keywords if keyword in haystack)
-            domain_bonus = 0.1 if ".org" in source.url or ".edu" in source.url else 0.0
-            length_bonus = min(len(source.snippet) / 250.0, 0.2)
-            return relevance + domain_bonus + length_bonus
-
-        sources.sort(key=score, reverse=True)
-        for source in sources:
-            source.rank_score = score(source)
-            source.reliability = 0.55 if ".org" in source.url or ".edu" in source.url else 0.45
-            source.relevance = min(source.rank_score / 3.0, 1.0)
-        return sources[:limit]
+        ranked = self.source_ranker.rank_sources(query, [source.__dict__ for source in sources], limit=limit)
+        ranked_sources = []
+        for item in ranked:
+            ranked_source = ResearchSource(
+                title=str(item.get("title", "")).strip(),
+                url=str(item.get("url", "")).strip(),
+                snippet=str(item.get("snippet", "")).strip(),
+                rank_score=float(item.get("score", 0.0) or 0.0),
+                reliability=float(item.get("reliability", 0.5) or 0.5),
+                relevance=float(item.get("relevance", 0.5) or 0.5),
+            )
+            ranked_sources.append(ranked_source)
+        return ranked_sources
 
 
     def _fetch_sources(self, sources):
