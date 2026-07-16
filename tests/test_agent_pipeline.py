@@ -83,17 +83,56 @@ class FakePlanner:
         )
 
 
+class FakeCritic:
+
+    def __init__(self, model=None):
+        self.model = model
+
+
+    def review(self, user_input, memory_context, plan, step_results, final_answer):
+        from critic import Critique
+
+        return Critique(
+            verdict="pass",
+            summary="Die Antwort ist passend.",
+            risks=[],
+            improvements=["Keine"],
+            confidence=0.91,
+            should_retry=False,
+            raw={"verdict": "pass"},
+            valid=True,
+            validation_errors=[]
+        )
+
+
 class FakeExecutionLoop:
 
-    def __init__(self, model, tool_executor, tool_manager):
+    def __init__(self, model, tool_executor, tool_manager, critic=None):
         self.model = model
         self.tool_executor = tool_executor
         self.tool_manager = tool_manager
+        self.critic = critic
         self.calls = []
 
 
     def run(self, user_input, memory_context, plan):
         self.calls.append((user_input, memory_context, plan.goal))
+        reflection = None
+        if self.critic is not None:
+            reflection = self.critic.review(
+                user_input=user_input,
+                memory_context=memory_context,
+                plan=plan,
+                step_results=[
+                    {
+                        "action": "respond",
+                        "input": None,
+                        "result": "Fertig.",
+                        "status": "ok"
+                    }
+                ],
+                final_answer="Fertig."
+            )
         return {
             "answer": "Fertig.",
             "step_results": [
@@ -104,7 +143,8 @@ class FakeExecutionLoop:
                     "status": "ok"
                 }
             ],
-            "plan": plan
+            "plan": plan,
+            "reflection": reflection
         }
 
 
@@ -116,6 +156,7 @@ class AgentPipelineTests(unittest.TestCase):
         self._original_validator = agent_module.MemoryValidator
         self._original_summarizer = agent_module.ConversationSummarizer
         self._original_planner = agent_module.Planner
+        self._original_critic = agent_module.Critic
         self._original_execution_loop = agent_module.ExecutionLoop
 
         agent_module.Memory = FakeMemory
@@ -123,6 +164,7 @@ class AgentPipelineTests(unittest.TestCase):
         agent_module.MemoryValidator = FakeValidator
         agent_module.ConversationSummarizer = FakeSummarizer
         agent_module.Planner = FakePlanner
+        agent_module.Critic = FakeCritic
         agent_module.ExecutionLoop = FakeExecutionLoop
 
         self.agent = agent_module.Agent()
@@ -134,6 +176,7 @@ class AgentPipelineTests(unittest.TestCase):
         agent_module.MemoryValidator = self._original_validator
         agent_module.ConversationSummarizer = self._original_summarizer
         agent_module.Planner = self._original_planner
+        agent_module.Critic = self._original_critic
         agent_module.ExecutionLoop = self._original_execution_loop
 
 
@@ -158,10 +201,15 @@ class AgentPipelineTests(unittest.TestCase):
         self.assertAlmostEqual(summary_kwargs["confidence"], 0.8, places=2)
 
 
-    def test_think_uses_planner_and_execution_loop(self):
+    def test_think_uses_planner_execution_loop_and_reflection(self):
         answer = self.agent.think("Analysiere die Datei example.txt")
         self.assertEqual(answer, "Fertig.")
         self.assertIn("Fertig.", self.agent.conversation.get_messages()[-1]["content"])
+        self.assertEqual(len(self.agent.memory.summary_calls), 2)
+        reflection_args, reflection_kwargs = self.agent.memory.summary_calls[1]
+        self.assertEqual(reflection_args[0], "execution_reflection")
+        self.assertIn("Die Antwort ist passend.", reflection_args[1])
+        self.assertAlmostEqual(reflection_kwargs["confidence"], 0.91, places=2)
 
 
 if __name__ == "__main__":

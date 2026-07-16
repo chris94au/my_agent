@@ -13,6 +13,9 @@ Die aktuelle Architektur erweitert den bestehenden Kern gezielt statt ihn umzuba
 `agent.py` koordiniert:
 
 - Chat mit dem Modell
+- Planung über `planner.py`
+- Ausführung über `execution_loop.py`
+- Reflexion über `critic.py`
 - Tool-Aufrufe
 - Memory-Extraktion
 - Memory-Normalisierung
@@ -52,8 +55,9 @@ Direkte Aussagen bekommen hohe Confidence. Unsichere oder indirekte Aussagen bek
 
 - Fakten
 - Gesprächszusammenfassungen
+- Ausführungsreflexionen als Summary-Memory
 
-beide mit Embeddings, Importance, Confidence und Status.
+alle mit Embeddings, Importance, Confidence und Status.
 
 ### 6. Conversation Summarizer
 
@@ -61,7 +65,7 @@ beide mit Embeddings, Importance, Confidence und Status.
 
 Diese ergänzen Fakten und ersetzen sie nicht.
 
-### 7. Retrieval
+### 7. Retrieval und Reflexion
 
 Das Retrieval kombiniert mehrere Signale:
 
@@ -70,6 +74,8 @@ Das Retrieval kombiniert mehrere Signale:
 - Confidence
 - Recency
 - Nutzungshäufigkeit
+
+Memory-Kontext fließt sowohl in den Planner als auch in den Critic ein. Nach der Ausführung werden Reflexionsnotizen wieder in Memory gespeichert.
 
 Damit werden die relevantesten Erinnerungen in den Prompt geladen.
 

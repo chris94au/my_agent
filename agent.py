@@ -4,6 +4,7 @@ import ollama
 
 from conversation import Conversation
 from conversation_summarizer import ConversationSummarizer
+from critic import Critic
 from execution_loop import ExecutionLoop
 from memory import Memory
 from memory_extractor import MemoryExtractor
@@ -28,10 +29,12 @@ class Agent:
 
         self.executor = ToolExecutor()
         self.planner = Planner(model=model)
+        self.critic = Critic(model=model)
         self.execution_loop = ExecutionLoop(
             model=model,
             tool_executor=self.executor,
-            tool_manager=tool_manager
+            tool_manager=tool_manager,
+            critic=self.critic
         )
         self.parser = ToolParser()
 
@@ -100,6 +103,7 @@ class Agent:
         )
 
         final_answer = execution["answer"]
+        reflection = execution.get("reflection")
 
         self.conversation.add_assistant(
             final_answer
@@ -109,17 +113,19 @@ class Agent:
             user_input,
             final_answer,
             plan,
-            execution.get("step_results", [])
+            execution.get("step_results", []),
+            reflection
         )
 
         self.update_memory(
-            execution_text
+            execution_text,
+            reflection=reflection
         )
 
         return final_answer
 
 
-    def _format_execution_trace(self, user_input, answer, plan, step_results):
+    def _format_execution_trace(self, user_input, answer, plan, step_results, reflection=None):
         plan_lines = [
             f"- {index + 1}. {step.action}: {step.description}"
             for index, step in enumerate(plan.steps)
@@ -128,6 +134,17 @@ class Agent:
             f"- {item.get('action')}: {item.get('result')}"
             for item in step_results
         ]
+
+        reflection_lines = []
+        if reflection:
+            reflection_lines = [
+                f"- Verdict: {getattr(reflection, 'verdict', '')}",
+                f"- Summary: {getattr(reflection, 'summary', '')}",
+            ]
+            for risk in getattr(reflection, 'risks', []) or []:
+                reflection_lines.append(f"- Risk: {risk}")
+            for improvement in getattr(reflection, 'improvements', []) or []:
+                reflection_lines.append(f"- Improvement: {improvement}")
 
         return f"""
         User:
@@ -142,12 +159,15 @@ class Agent:
         Step results:
         {chr(10).join(result_lines)}
 
+        Reflection:
+        {chr(10).join(reflection_lines)}
+
         Final answer:
         {answer}
         """
 
 
-    def update_memory(self, conversation_text):
+    def update_memory(self, conversation_text, reflection=None):
 
         memories = self.memory_extractor.extract(
             conversation_text
@@ -221,6 +241,35 @@ class Agent:
             memories
         )
         self._store_summary(summary)
+        self._store_reflection(reflection)
+
+
+    def _store_reflection(self, reflection):
+        if not reflection:
+            return
+
+        if getattr(reflection, "summary", None) is None:
+            return
+
+        topic = "execution_reflection"
+        payload = f"{getattr(reflection, 'verdict', 'warn')}: {reflection.summary}"
+
+        if getattr(reflection, 'risks', None):
+            payload += "\nRisks: " + "; ".join(reflection.risks)
+        if getattr(reflection, 'improvements', None):
+            payload += "\nImprovements: " + "; ".join(reflection.improvements)
+
+        status = self.memory.save_summary(
+            topic,
+            payload,
+            importance=5 if getattr(reflection, 'verdict', 'warn') == 'pass' else 6,
+            confidence=getattr(reflection, 'confidence', 0.65)
+        )
+
+        logger.info(
+            "Reflection status: %s",
+            status.get("status")
+        )
 
 
     def _store_summary(self, summary):

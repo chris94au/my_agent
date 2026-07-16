@@ -1,9 +1,1 @@
-from datetime import datetime
-
-
-
-def current_time(_):
-
-    return datetime.now().strftime(
-        "%d.%m.%Y %H:%M:%S"
-    )
+from .datetime import current_time, tool

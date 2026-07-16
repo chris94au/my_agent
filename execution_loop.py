@@ -10,10 +10,11 @@ logger = logging.getLogger(__name__)
 
 class ExecutionLoop:
 
-    def __init__(self, model, tool_executor, tool_manager):
+    def __init__(self, model, tool_executor, tool_manager, critic=None):
         self.model = model
         self.tool_executor = tool_executor
         self.tool_manager = tool_manager
+        self.critic = critic
 
 
     def _render_step_results(self, step_results):
@@ -63,6 +64,19 @@ Ergebnisse der Ausführung:
         return response["message"]["content"]
 
 
+    def _build_reflection(self, user_input, memory_context, plan, step_results, final_answer):
+        if self.critic is None:
+            return None
+
+        return self.critic.review(
+            user_input=user_input,
+            memory_context=memory_context,
+            plan=plan,
+            step_results=step_results,
+            final_answer=final_answer
+        )
+
+
     def run(self, user_input, memory_context, plan):
         step_results = []
         for step in plan.steps:
@@ -86,10 +100,18 @@ Ergebnisse der Ausführung:
                         "status": "ok"
                     }
                 )
+                reflection = self._build_reflection(
+                    user_input,
+                    memory_context,
+                    plan,
+                    step_results,
+                    result
+                )
                 return {
                     "answer": result,
                     "step_results": step_results,
-                    "plan": plan
+                    "plan": plan,
+                    "reflection": reflection
                 }
 
             if step.action in {"summarize", "analyze", "reflect", "review"}:
@@ -135,8 +157,16 @@ Ergebnisse der Ausführung:
             plan,
             step_results
         )
+        reflection = self._build_reflection(
+            user_input,
+            memory_context,
+            plan,
+            step_results,
+            final_answer
+        )
         return {
             "answer": final_answer,
             "step_results": step_results,
-            "plan": plan
+            "plan": plan,
+            "reflection": reflection
         }
