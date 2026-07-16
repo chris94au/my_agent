@@ -1,0 +1,4 @@
+Das ist eine Testdatei.
+
+Der Agent kann diese Datei lesen.
+Ich lerne gerade, wie man KI-Agenten programmiert.
