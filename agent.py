@@ -205,10 +205,12 @@ class Agent:
         if not memories:
             return
         
-        for memory in memories:
-            memory = self.normalizer.normalize(
+        memories = [
+            self.normalizer.normalize(
                 memory
             )
+            for memory in memories
+        ]
 
 
         for memory in memories:
