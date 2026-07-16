@@ -4,11 +4,14 @@ import ollama
 
 from conversation import Conversation
 from conversation_summarizer import ConversationSummarizer
+from critic import Critic
+from execution_loop import ExecutionLoop
 from memory import Memory
 from memory_extractor import MemoryExtractor
 from memory_validator import MemoryValidator
 from normalizer import Normalizer
 from parser import ToolParser
+from planner import Planner
 from prompts import create_system_prompt
 from tool_executor import ToolExecutor
 from tools import tool_manager
@@ -25,6 +28,14 @@ class Agent:
         self.model = model
 
         self.executor = ToolExecutor()
+        self.planner = Planner(model=model)
+        self.critic = Critic(model=model)
+        self.execution_loop = ExecutionLoop(
+            model=model,
+            tool_executor=self.executor,
+            tool_manager=tool_manager,
+            critic=self.critic
+        )
         self.parser = ToolParser()
 
         self.memory = Memory()
@@ -66,112 +77,97 @@ class Agent:
         memory_context = self.memory.get_semantic_context(
             user_input
         )
-
         self.conversation.add_system(
             memory_context
         )
 
-        response = ollama.chat(
-            model=self.model,
-            messages=self.conversation.get_messages()
+        plan = self.planner.plan(
+            user_input=user_input,
+            memory_context=memory_context,
+            tool_descriptions=tool_manager.get_descriptions(),
+            available_tools=[
+                tool.name
+                for tool in tool_manager.list_tools()
+            ]
         )
 
-        answer = response["message"]["content"]
-
-        logger.debug(
-            "Model response: %s",
-            answer
+        logger.info(
+            "Planner goal: %s",
+            plan.goal
         )
 
-        tool_call = self.parser.parse(
-            answer
+        execution = self.execution_loop.run(
+            user_input=user_input,
+            memory_context=memory_context,
+            plan=plan
         )
 
-        if tool_call and "tool" in tool_call:
-
-            tool_name = tool_call["tool"]
-
-            logger.info(
-                "Tool recognized: %s",
-                tool_name
-            )
-
-            if "input" in tool_call:
-                tool_input = tool_call["input"]
-            else:
-                tool_input = {
-                    key: value
-                    for key, value in tool_call.items()
-                    if key != "tool"
-                }
-
-            success, result = self.executor.execute(
-                tool_name,
-                tool_input
-            )
-
-            if not success:
-                return result
-
-            logger.info(
-                "Tool result: %s",
-                result
-            )
-
-            self.conversation.add_assistant(
-                f"Ich habe das Werkzeug '{tool_name}' verwendet."
-            )
-
-            self.conversation.add_user(
-                f"""
-                Das Werkzeug wurde ausgeführt.
-
-                Werkzeug:
-                {tool_name}
-
-                Ergebnis:
-                {result}
-
-                Beantworte jetzt die ursprüngliche Benutzeranfrage.
-                Antworte nur mit normalem Text.
-                Erzeuge kein JSON.
-                """
-            )
-
-            final = ollama.chat(
-                model=self.model,
-                messages=self.conversation.get_messages()
-            )
-
-            final_answer = final["message"]["content"]
-
-            self.conversation.add_assistant(
-                final_answer
-            )
-
-            return final_answer
-
+        final_answer = execution["answer"]
+        reflection = execution.get("reflection")
 
         self.conversation.add_assistant(
-            answer
+            final_answer
         )
 
-        conversation_text = f"""
+        execution_text = self._format_execution_trace(
+            user_input,
+            final_answer,
+            plan,
+            execution.get("step_results", []),
+            reflection
+        )
+
+        self.update_memory(
+            execution_text,
+            reflection=reflection
+        )
+
+        return final_answer
+
+
+    def _format_execution_trace(self, user_input, answer, plan, step_results, reflection=None):
+        plan_lines = [
+            f"- {index + 1}. {step.action}: {step.description}"
+            for index, step in enumerate(plan.steps)
+        ]
+        result_lines = [
+            f"- {item.get('action')}: {item.get('result')}"
+            for item in step_results
+        ]
+
+        reflection_lines = []
+        if reflection:
+            reflection_lines = [
+                f"- Verdict: {getattr(reflection, 'verdict', '')}",
+                f"- Summary: {getattr(reflection, 'summary', '')}",
+            ]
+            for risk in getattr(reflection, 'risks', []) or []:
+                reflection_lines.append(f"- Risk: {risk}")
+            for improvement in getattr(reflection, 'improvements', []) or []:
+                reflection_lines.append(f"- Improvement: {improvement}")
+
+        return f"""
         User:
         {user_input}
 
-        Assistant:
+        Plan goal:
+        {plan.goal}
+
+        Plan steps:
+        {chr(10).join(plan_lines)}
+
+        Step results:
+        {chr(10).join(result_lines)}
+
+        Reflection:
+        {chr(10).join(reflection_lines)}
+
+        Final answer:
         {answer}
         """
 
-        self.update_memory(
-            conversation_text
-        )
 
-        return answer
-
-
-    def update_memory(self, conversation_text):
+    def update_memory(self, conversation_text, reflection=None):
 
         memories = self.memory_extractor.extract(
             conversation_text
@@ -245,6 +241,35 @@ class Agent:
             memories
         )
         self._store_summary(summary)
+        self._store_reflection(reflection)
+
+
+    def _store_reflection(self, reflection):
+        if not reflection:
+            return
+
+        if getattr(reflection, "summary", None) is None:
+            return
+
+        topic = "execution_reflection"
+        payload = f"{getattr(reflection, 'verdict', 'warn')}: {reflection.summary}"
+
+        if getattr(reflection, 'risks', None):
+            payload += "\nRisks: " + "; ".join(reflection.risks)
+        if getattr(reflection, 'improvements', None):
+            payload += "\nImprovements: " + "; ".join(reflection.improvements)
+
+        status = self.memory.save_summary(
+            topic,
+            payload,
+            importance=5 if getattr(reflection, 'verdict', 'warn') == 'pass' else 6,
+            confidence=getattr(reflection, 'confidence', 0.65)
+        )
+
+        logger.info(
+            "Reflection status: %s",
+            status.get("status")
+        )
 
 
     def _store_summary(self, summary):

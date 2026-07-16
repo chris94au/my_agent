@@ -19,6 +19,10 @@ Der Agent nutzt lokal:
 Die aktuelle Architektur ist auf Erweiterbarkeit statt auf einen großen Umbau ausgelegt:
 
 - **Agent-Kern** in `agent.py`
+- **Planner** in `planner.py` für mehrschrittige Aufgaben
+- **Execution Loop** in `execution_loop.py` für Tool-Aufrufe und Antwortsynthese
+- **Critic** in `critic.py` für Reflexion nach der Ausführung
+- **Tool Registry** in `tools/registry.py` mit Berechtigungen, Parametervalidierung und Audit-Logging
 - **Prompt-Verwaltung** in `prompts.py`
 - **Tool-System** in `tools/`
 - **Memory-Pipeline** mit Extraktion, Normalisierung, Validierung, Speicherung und Retrieval
@@ -77,7 +81,7 @@ Separat gespeicherte Gesprächskontexte mit:
 
 Statt sofort zu löschen werden schwächere Einträge in den Archiv-Status verschoben. Wichtige Erinnerungen bleiben aktiv.
 
-## Retrieval
+## Retrieval und Reflexion
 
 Die Relevanz wird nicht nur über Embedding-Ähnlichkeit berechnet, sondern kombiniert:
 
@@ -86,6 +90,8 @@ Die Relevanz wird nicht nur über Embedding-Ähnlichkeit berechnet, sondern komb
 - Confidence
 - Recency
 - Nutzungshistorie
+
+Der Agent nutzt Memory auch beim Planen und bei der Reflexion nach der Ausführung. Reflections werden als eigene Summary-Memory unter `execution_reflection` gespeichert.
 
 Damit bleiben alte, aber wichtige Erinnerungen sichtbar.
 
