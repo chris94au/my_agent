@@ -441,6 +441,10 @@ class AgentAPI(QObject):
     knowledge_updated = Signal(dict)
     tasks_updated = Signal(list)
     logs_updated = Signal(list)
+    agent_dashboard_updated = Signal(dict)
+    agent_activity_updated = Signal(list)
+    agent_communication_updated = Signal(dict)
+    context_updated = Signal(dict)
     error_occurred = Signal(str)
 
 
@@ -461,6 +465,7 @@ class AgentAPI(QObject):
         self._last_answer: str | None = None
         self._last_send_thread: threading.Thread | None = None
         self._last_state: dict[str, Any] = {}
+        self._last_orchestration_state: dict[str, Any] = {}
         self._research_history: list[dict] = []
 
 
@@ -504,6 +509,10 @@ class AgentAPI(QObject):
         self.knowledge_updated.emit(self.get_knowledge_snapshot())
         self.tasks_updated.emit(self.get_tasks())
         self.logs_updated.emit(self.get_logs())
+        self.agent_dashboard_updated.emit(self.get_agent_dashboard())
+        self.agent_activity_updated.emit(self.get_agent_activity())
+        self.agent_communication_updated.emit(self.get_agent_communication())
+        self.context_updated.emit(self.get_context_snapshot())
 
 
     def _process_answer(self, message: str, stream: bool = True):
@@ -517,6 +526,7 @@ class AgentAPI(QObject):
             with self._lock:
                 self._last_answer = answer
                 self._last_state = self._build_state_snapshot()
+                self._last_orchestration_state = self.get_context_snapshot()
                 self._append_chat("assistant", answer)
                 research_result = self._last_state.get("research", {})
                 if research_result:
@@ -553,6 +563,7 @@ class AgentAPI(QObject):
         answer = self.agent.think(message)
         self._last_answer = answer
         self._last_state = self._build_state_snapshot()
+        self._last_orchestration_state = self.get_context_snapshot()
         self._append_chat("assistant", answer)
         self._emit_state()
         return answer
@@ -569,6 +580,7 @@ class AgentAPI(QObject):
         self._last_user_message = None
         self._last_answer = None
         self._last_state = {}
+        self._last_orchestration_state = {}
         if self._agent is not None:
             self._agent.conversation = self._agent.conversation.__class__(self._agent.system_prompt)
             self._agent.last_plan = None
@@ -595,6 +607,9 @@ class AgentAPI(QObject):
         tasks = self.get_tasks()
         knowledge = self.get_knowledge_snapshot()
         logs = self.get_logs()
+        agent_dashboard = self.get_agent_dashboard()
+        agent_activity = self.get_agent_activity()
+        context = self.get_context_snapshot()
         return {
             "planner": planner,
             "research": research,
@@ -603,6 +618,9 @@ class AgentAPI(QObject):
             "tasks": tasks,
             "knowledge": knowledge,
             "logs": logs,
+            "agent_dashboard": agent_dashboard,
+            "agent_activity": agent_activity,
+            "context": context,
         }
 
 
@@ -756,6 +774,49 @@ class AgentAPI(QObject):
 
     def get_research(self):
         return self.get_research_snapshot()
+
+
+    def get_agent_dashboard(self):
+        agent = self.start()
+        orchestrator = getattr(agent, "orchestrator", None)
+        registry = getattr(orchestrator, "registry", None)
+        route = getattr(orchestrator, "last_route", None)
+        return {
+            "agents": registry.list_metadata() if registry is not None else [],
+            "route": route.__dict__ if hasattr(route, "__dict__") else route,
+            "answer": getattr(orchestrator, "last_answer", None),
+            "status": "ready" if registry is not None else "unavailable",
+        }
+
+
+    def get_agent_activity(self):
+        agent = self.start()
+        orchestrator = getattr(agent, "orchestrator", None)
+        if orchestrator is None:
+            return []
+        context_bus = getattr(orchestrator, "context_bus", None)
+        snapshot = context_bus.snapshot() if context_bus is not None else {}
+        outcomes = []
+        for outcome in snapshot.get("events", []):
+            if outcome.get("kind") == "agent_outcome":
+                payload = outcome.get("payload")
+                if hasattr(payload, "__dict__"):
+                    payload = payload.__dict__
+                outcomes.append({"source": outcome.get("source"), "payload": payload, "timestamp": outcome.get("timestamp")})
+        return outcomes
+
+
+    def get_agent_communication(self):
+        agent = self.start()
+        orchestrator = getattr(agent, "orchestrator", None)
+        context_bus = getattr(orchestrator, "context_bus", None)
+        if context_bus is None:
+            return {"events": [], "agent_reports": {}, "tool_results": [], "sources": [], "shared": {}, "memory_context": {}}
+        return context_bus.snapshot()
+
+
+    def get_context_snapshot(self):
+        return self.get_agent_communication()
 
 
     def get_tool_events(self, status: str | None = None):

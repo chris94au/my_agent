@@ -13,6 +13,7 @@ from normalizer import Normalizer
 from parser import ToolParser
 from planner import Planner
 from prompts import create_system_prompt
+from orchestrator import Orchestrator
 from research.pipeline import ResearchPipeline
 from tool_executor import ToolExecutor
 from tools import tool_manager
@@ -27,43 +28,41 @@ class Agent:
     def __init__(self, model="qwen2.5:7b"):
 
         self.model = model
-
-        self.executor = ToolExecutor()
-        self.planner = Planner(model=model)
-        self.critic = Critic(model=model)
-
-        self.memory = Memory()
-        self.memory_extractor = MemoryExtractor()
-        self.memory_validator = MemoryValidator()
-        self.memory_summarizer = ConversationSummarizer()
-        self.normalizer = Normalizer()
-
-        self.research_pipeline = ResearchPipeline(
-            model=model,
-            memory=self.memory
-        )
-        self.execution_loop = ExecutionLoop(
-            model=model,
-            tool_executor=self.executor,
-            tool_manager=tool_manager,
-            critic=self.critic,
-            research_pipeline=self.research_pipeline
-        )
         self.parser = ToolParser()
 
-        self.system_prompt = create_system_prompt(
-            tool_manager
+        self.orchestrator = Orchestrator(
+            model=model,
+            planner_cls=Planner,
+            critic_cls=Critic,
+            execution_loop_cls=ExecutionLoop,
+            research_pipeline_cls=ResearchPipeline,
+            memory_cls=Memory,
+            extractor_cls=MemoryExtractor,
+            validator_cls=MemoryValidator,
+            summarizer_cls=ConversationSummarizer,
+            normalizer_cls=Normalizer,
+            tool_executor_cls=ToolExecutor,
+            tool_manager_obj=tool_manager,
         )
 
-        self.conversation = Conversation(
-            self.system_prompt
-        )
+        self.executor = self.orchestrator.execution_loop.tool_executor
+        self.planner = self.orchestrator.planner
+        self.critic = self.orchestrator.critic
+        self.memory = self.orchestrator.memory
+        self.memory_extractor = self.orchestrator.extractor
+        self.memory_validator = self.orchestrator.validator
+        self.memory_summarizer = self.orchestrator.summarizer
+        self.normalizer = self.orchestrator.normalizer
+        self.research_pipeline = self.orchestrator.research_pipeline
+        self.execution_loop = self.orchestrator.execution_loop
+        self.system_prompt = self.orchestrator.conversation.get_messages()[0]["content"]
+        self.conversation = self.orchestrator.conversation
 
-        self.last_plan = None
-        self.last_execution = None
-        self.last_reflection = None
-        self.last_research_result = None
-        self.last_answer = None
+        self.last_plan = self.orchestrator.last_plan
+        self.last_execution = self.orchestrator.last_execution
+        self.last_reflection = self.orchestrator.last_reflection
+        self.last_research_result = self.orchestrator.last_research_result
+        self.last_answer = self.orchestrator.last_answer
 
 
     def think(self, user_input):
@@ -83,55 +82,25 @@ class Agent:
             )
 
 
-        self.conversation.add_user(
-            user_input
-        )
+        orchestration = self.orchestrator.think(user_input)
+        final_answer = orchestration.final_response
+        plan = orchestration.plan
+        execution = orchestration.context.get("execution", {}) if isinstance(orchestration.context, dict) else {}
+        reflection = orchestration.context.get("reflection") if isinstance(orchestration.context, dict) else None
+        if reflection is None:
+            reflection = self.orchestrator.last_reflection
 
-        memory_context = self.memory.get_semantic_context(
-            user_input
-        )
-        self.conversation.add_system(
-            memory_context
-        )
-
-        plan = self.planner.plan(
-            user_input=user_input,
-            memory_context=memory_context,
-            tool_descriptions=tool_manager.get_descriptions(),
-            available_tools=[
-                tool.name
-                for tool in tool_manager.list_tools()
-            ]
-        )
-
-        logger.info(
-            "Planner goal: %s",
-            plan.goal
-        )
-
-        execution = self.execution_loop.run(
-            user_input=user_input,
-            memory_context=memory_context,
-            plan=plan
-        )
-
-        final_answer = execution["answer"]
-        reflection = execution.get("reflection")
         self.last_plan = plan
         self.last_execution = execution
         self.last_reflection = reflection
         self.last_answer = final_answer
-        self.last_research_result = self._extract_research_result(execution.get("step_results", []))
-
-        self.conversation.add_assistant(
-            final_answer
-        )
+        self.last_research_result = self._extract_research_result(execution.get("step_results", []) if isinstance(execution, dict) else [])
 
         execution_text = self._format_execution_trace(
             user_input,
             final_answer,
             plan,
-            execution.get("step_results", []),
+            execution.get("step_results", []) if isinstance(execution, dict) else [],
             reflection
         )
 
@@ -199,14 +168,22 @@ class Agent:
             self._store_summary(summary)
             return
 
-        memories = [
-            self.normalizer.normalize_fact(
-                memory
-            )
-            for memory in memories
-        ]
-
+        normalized_memories = []
         for memory in memories:
+            if not isinstance(memory, dict):
+                continue
+            if not memory.get("category") or not memory.get("key") or not memory.get("value"):
+                continue
+            try:
+                normalized_memories.append(
+                    self.normalizer.normalize_fact(
+                        memory
+                    )
+                )
+            except Exception:
+                continue
+
+        for memory in normalized_memories:
 
             validation = self.memory_validator.validate(
                 memory,
@@ -256,7 +233,7 @@ class Agent:
 
         summary = self.memory_summarizer.summarize(
             conversation_text,
-            memories
+            normalized_memories
         )
         self._store_summary(summary)
         self._store_reflection(reflection)
