@@ -27,7 +27,8 @@ Die aktuelle Architektur ist auf Erweiterbarkeit statt auf einen großen Umbau a
 - **Tool-System** in `tools/`
 - **Memory-Pipeline** mit Extraktion, Normalisierung, Validierung, Speicherung und Retrieval
 - **Zusammenfassungen** als eigene Memory-Ebene neben Fakten
-- **Internetrecherche** über `web_search` und `read_url`
+- **Internetrecherche** über `web_search`, `web_fetch` und `read_url`
+- **Research Pipeline** in `research/` für Quellenbewertung, Extraktion, Synthese und Zitationen
 
 ## Memory-Pipeline
 
@@ -81,6 +82,21 @@ Separat gespeicherte Gesprächskontexte mit:
 
 Statt sofort zu löschen werden schwächere Einträge in den Archiv-Status verschoben. Wichtige Erinnerungen bleiben aktiv.
 
+## Research-Architektur
+
+Der Agent arbeitet bei Research-Anfragen nicht nur mit Suchergebnissen, sondern mit einer mehrstufigen Research-Pipeline:
+
+1. `web_search` findet mögliche Quellen.
+2. `research/source_ranker.py` bewertet Quellen nach Zuverlässigkeit, Relevanz und Vollständigkeit.
+3. `web_fetch` ruft den Seiteninhalt ab.
+4. `research/html_parser.py` bereinigt HTML und extrahiert lesbaren Text.
+5. `research/extractor.py` extrahiert strukturierte Fakten aus den Quellen.
+6. `research/synthesizer.py` führt mehrere Quellen zu einem konsistenten Research-Context zusammen.
+7. `research/citations.py` verfolgt Claims und Quellen.
+8. `research/memory_integration.py` speichert nur langfristig relevante Erkenntnisse oder Benutzerpräferenzen.
+
+Suchergebnisse sind nur Quellenhinweise, nicht die fertige Antwort.
+
 ## Retrieval und Reflexion
 
 Die Relevanz wird nicht nur über Embedding-Ähnlichkeit berechnet, sondern kombiniert:
@@ -111,8 +127,9 @@ python3 -m unittest discover -s tests -p "test_*.py"
 - `memory_validator.py` – Qualitäts- und Vertrauensbewertung für Memories
 - `memory_extractor.py` – Extraktion strukturierter Memory-Kandidaten aus Gesprächen
 - `conversation_summarizer.py` – langfristige Gesprächszusammenfassungen
-- `tools/` – lokale Tools, inklusive Websuche und Dateioperationen
-- `tests/` – automatisierte Tests für Memory und Pipeline
+- `tools/` – lokale Tools, inklusive Websuche, Web-Fetch und Dateioperationen
+- `research/` – Research-Module für HTML-Bereinigung, Ranking, Extraktion, Synthese, Zitationen und Memory-Integration
+- `tests/` – automatisierte Tests für Memory, Research und Pipeline
 
 ## Aktueller Stand
 
