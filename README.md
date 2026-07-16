@@ -38,6 +38,7 @@ Die aktuelle Architektur ist auf Erweiterbarkeit statt auf einen großen Umbau a
 - **Zusammenfassungen** als eigene Memory-Ebene neben Fakten
 - **Internetrecherche** über `web_search`, `web_fetch` und `read_url`
 - **Research Pipeline** in `research/` für Quellenbewertung, Extraktion, Synthese und Zitationen
+- **Multi-Agent-Plattform** mit `orchestrator.py`, `agent_router.py`, `context_bus.py` und spezialisierten Agenten in `agents/`
 
 ## Memory-Pipeline
 

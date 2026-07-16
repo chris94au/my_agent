@@ -24,6 +24,10 @@ class GuiStartupTests(unittest.TestCase):
         self.assertIn("memory", window.panels)
         self.assertIn("research", window.panels)
         self.assertIn("tools", window.panels)
+        self.assertIn("agent_dashboard", window.panels)
+        self.assertIn("agent_activity", window.panels)
+        self.assertIn("agent_communication", window.panels)
+        self.assertIn("context_viewer", window.panels)
 
 
 if __name__ == "__main__":
