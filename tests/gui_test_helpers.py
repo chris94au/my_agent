@@ -28,6 +28,10 @@ class FakeGUIAPI:
         self.knowledge_updated = DummySignal()
         self.tasks_updated = DummySignal()
         self.logs_updated = DummySignal()
+        self.agent_dashboard_updated = DummySignal()
+        self.agent_activity_updated = DummySignal()
+        self.agent_communication_updated = DummySignal()
+        self.context_updated = DummySignal()
         self.state_changed = DummySignal()
         self.error_occurred = DummySignal()
         self._chat_history = []
@@ -93,6 +97,16 @@ class FakeGUIAPI:
         self._tasks = [
             {"id": 1, "title": "Analyse Report", "status": "active", "progress": 0.4, "priority": 4, "next_step": "Read doc", "scheduled_for": None}
         ]
+        self._agents = [
+            {"name": "planner_agent", "role": "planner", "description": "Planung", "version": "1.0", "capabilities": ["planning"], "allowed_tools": [], "denied_tools": [], "priority": 100},
+            {"name": "research_agent", "role": "research", "description": "Recherche", "version": "1.0", "capabilities": ["research"], "allowed_tools": ["web_search"], "denied_tools": ["filesystem:write"], "priority": 80},
+            {"name": "critic_agent", "role": "critic", "description": "Review", "version": "1.0", "capabilities": ["critique"], "allowed_tools": [], "denied_tools": ["filesystem:write"], "priority": 90},
+        ]
+        self._activity = [
+            {"source": "planner_agent", "payload": {"goal": "Projekt analysieren"}, "timestamp": "2026-07-16T10:00:00+00:00"},
+            {"source": "research_agent", "payload": {"summary": "Research summary"}, "timestamp": "2026-07-16T10:01:00+00:00"},
+        ]
+        self._context = {"shared": {"user_input": ""}, "agent_reports": {}, "tool_results": [], "sources": [], "memory_context": {}, "events": []}
         self._logs = [
             {"timestamp": "2026-07-16T10:00:00+00:00", "logger_name": "planner", "level": "INFO", "message": "Planner started"}
         ]
@@ -133,6 +147,10 @@ class FakeGUIAPI:
         self.knowledge_updated.emit(self._knowledge)
         self.tasks_updated.emit(self._tasks)
         self.logs_updated.emit(self._logs)
+        self.agent_dashboard_updated.emit(self.get_agent_dashboard())
+        self.agent_activity_updated.emit(self.get_agent_activity())
+        self.agent_communication_updated.emit(self.get_agent_communication())
+        self.context_updated.emit(self.get_context_snapshot())
         self.state_changed.emit()
         return None
 
@@ -160,6 +178,22 @@ class FakeGUIAPI:
 
     def get_planner_snapshot(self):
         return dict(self._planner)
+
+
+    def get_agent_dashboard(self):
+        return {"agents": list(self._agents), "route": {"agents": [agent["name"] for agent in self._agents]}, "answer": "Antwort", "status": "ready"}
+
+
+    def get_agent_activity(self):
+        return list(self._activity)
+
+
+    def get_agent_communication(self):
+        return dict(self._context)
+
+
+    def get_context_snapshot(self):
+        return dict(self._context)
 
 
     def get_tool_events(self, status=None):
@@ -269,4 +303,8 @@ class FakeGUIAPI:
         self.tasks_updated.emit(self._tasks)
         self.logs_updated.emit(self._logs)
         self.tool_events_updated.emit(self.get_tool_events())
+        self.agent_dashboard_updated.emit(self.get_agent_dashboard())
+        self.agent_activity_updated.emit(self.get_agent_activity())
+        self.agent_communication_updated.emit(self.get_agent_communication())
+        self.context_updated.emit(self.get_context_snapshot())
         return True
