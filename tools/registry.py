@@ -126,10 +126,15 @@ class ToolRegistry:
                 input TEXT,
                 result TEXT,
                 status TEXT,
+                runtime_ms REAL,
                 error TEXT
             )
             """
         )
+        cursor.execute("PRAGMA table_info(tool_events)")
+        existing = {row[1] for row in cursor.fetchall()}
+        if "runtime_ms" not in existing:
+            cursor.execute("ALTER TABLE tool_events ADD COLUMN runtime_ms REAL")
         connection.commit()
         connection.close()
 
@@ -182,13 +187,13 @@ class ToolRegistry:
         return True, normalized_input, []
 
 
-    def _log_event(self, agent, tool, input_data, result, status, error=None):
+    def _log_event(self, agent, tool, input_data, result, status, runtime_ms=None, error=None):
         connection = sqlite3.connect(str(self.audit_db_path))
         cursor = connection.cursor()
         cursor.execute(
             """
-            INSERT INTO tool_events (timestamp, agent, tool, input, result, status, error)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO tool_events (timestamp, agent, tool, input, result, status, runtime_ms, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 datetime.now(timezone.utc).isoformat(),
@@ -197,6 +202,7 @@ class ToolRegistry:
                 json.dumps(input_data, ensure_ascii=False, default=str),
                 json.dumps(result, ensure_ascii=False, default=str),
                 status,
+                runtime_ms,
                 error,
             )
         )
@@ -225,25 +231,30 @@ class ToolRegistry:
             return False, error
 
         tool = self.get(tool_name)
+        start = datetime.now(timezone.utc)
         try:
             result = tool.execute(normalized_input)
+            runtime_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000.0
             self._log_event(
                 agent,
                 tool_name,
                 normalized_input,
                 result,
-                status="ok"
+                status="ok",
+                runtime_ms=runtime_ms,
             )
             return True, result
         except Exception as exc:
             logger.exception("Tool execution failed: %s", tool_name)
             error = f"Fehler beim Ausführen: {exc}"
+            runtime_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000.0
             self._log_event(
                 agent,
                 tool_name,
                 normalized_input,
                 {"error": error},
                 status="error",
+                runtime_ms=runtime_ms,
                 error=str(exc)
             )
             return False, error

@@ -4,8 +4,16 @@ Ein lokaler Python-AI-Agent mit Memory, Embeddings, Tool-Aufrufen und Internetre
 
 ## Start
 
+Konsolenmodus:
+
 ```bash
 python3 main.py
+```
+
+Desktop-GUI:
+
+```bash
+python3 main.py --gui
 ```
 
 Der Agent nutzt lokal:
@@ -13,6 +21,7 @@ Der Agent nutzt lokal:
 - `qwen2.5:7b` für Chat, Memory-Extraktion, Validator und Zusammenfassungen
 - `nomic-embed-text` für Embeddings
 - SQLite für persistentes Memory
+- PySide6 für die native Desktop-GUI
 
 ## Architektur
 

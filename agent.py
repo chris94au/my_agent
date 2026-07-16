@@ -59,6 +59,12 @@ class Agent:
             self.system_prompt
         )
 
+        self.last_plan = None
+        self.last_execution = None
+        self.last_reflection = None
+        self.last_research_result = None
+        self.last_answer = None
+
 
     def think(self, user_input):
 
@@ -111,6 +117,11 @@ class Agent:
 
         final_answer = execution["answer"]
         reflection = execution.get("reflection")
+        self.last_plan = plan
+        self.last_execution = execution
+        self.last_reflection = reflection
+        self.last_answer = final_answer
+        self.last_research_result = self._extract_research_result(execution.get("step_results", []))
 
         self.conversation.add_assistant(
             final_answer
@@ -249,6 +260,15 @@ class Agent:
         )
         self._store_summary(summary)
         self._store_reflection(reflection)
+
+
+    def _extract_research_result(self, step_results):
+        for item in step_results:
+            if item.get("action") in {"research", "research_pipeline"}:
+                result = item.get("result")
+                if isinstance(result, dict):
+                    return result
+        return None
 
 
     def _store_reflection(self, reflection):
